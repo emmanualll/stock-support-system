@@ -165,13 +165,22 @@ def save_universal_model(rf_model, xgb_model,
     logger.info(f"Universal model saved to {path}/")
 
 
-def load_universal_model(path: str = "models"):
-    """Load the universal model."""
-    rf_model     = joblib.load(f"{path}/universal_rf.pkl")
-    xgb_model    = joblib.load(f"{path}/universal_xgb.pkl")
-    scaler       = joblib.load(f"{path}/universal_scaler.pkl")
-    feature_cols = joblib.load(f"{path}/universal_features.pkl")
-    logger.info("Universal model loaded")
+def load_universal_model(path: str = "models",
+                          use_selected: bool = True):
+    """Load the universal model — selected features by default."""
+    if use_selected and os.path.exists(f"{path}/universal_rf_selected.pkl"):
+        suffix = "_selected"
+    else:
+        suffix = ""
+
+    rf_model     = joblib.load(f"{path}/universal_rf{suffix}.pkl")
+    xgb_model    = joblib.load(f"{path}/universal_xgb{suffix}.pkl")
+    scaler       = joblib.load(f"{path}/universal_scaler{suffix}.pkl")
+    feature_cols = joblib.load(f"{path}/universal_features{suffix}.pkl")
+
+    label = "selected" if suffix else "full"
+    logger.info(f"Universal model loaded ({label} features, {len(feature_cols)} features)")
+
     return rf_model, xgb_model, scaler, feature_cols
 
 
