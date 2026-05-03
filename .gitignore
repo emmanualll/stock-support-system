@@ -1,0 +1,33 @@
+# Virtual environment
+venv/
+env/
+.env
+
+# Data files (too large for GitHub)
+data/
+*.csv
+
+# Saved models (too large for GitHub)
+models/
+*.pkl
+*.joblib
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Jupyter notebooks checkpoints
+.ipynb_checkpoints/
+
+# Mac junk
+.DS_Store
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
