@@ -14,6 +14,78 @@ logging.basicConfig (
 )
 logger = logging.getLogger(__name__)
 
+
+def ensure_models_exist():
+    """
+    Check if trained models exist.
+    If not, train them from scratch automatically.
+    First run takes ~10 minutes. After that models are cached.
+    """
+    if not os.path.exists("models/universal_rf_selected.pkl"):
+        logger.info("No trained models found. Training from scratch...")
+        logger.info("This will take 10-15 minutes on first run.")
+        logger.info("Models will be saved and reused after this.")
+
+        # Run the full universal model training pipeline
+        from universal_model import (build_universal_dataset,
+                                      train_universal_model,
+                                      save_universal_model)
+        from feature_selection import (calculate_universal_shap_importance,
+                                        select_features,
+                                        evaluate_feature_subset)
+        import joblib
+
+        # Build dataset
+        combined_df = build_universal_dataset()
+        os.makedirs("data", exist_ok=True)
+        combined_df.to_csv("data/universal_dataset.csv")
+
+        # Train universal model
+        rf_model, xgb_model, scaler, feature_cols, test_df = \
+            train_universal_model(combined_df)
+
+        # Feature selection
+        from universal_model import temporal_split_universal
+        train_df, test_df_fs = temporal_split_universal(combined_df)
+        feature_cols_clean = [c for c in feature_cols if c != 'ticker']
+
+        X_test_scaled = pd.DataFrame(
+            scaler.transform(test_df_fs[feature_cols_clean]),
+            columns=feature_cols_clean,
+            index=test_df_fs.index
+        )
+
+        importance_df = calculate_universal_shap_importance(
+            rf_model, X_test_scaled, feature_cols_clean
+        )
+        top_50 = importance_df.head(50)['feature'].tolist()
+
+        # Retrain with top 50
+        from sklearn.preprocessing import RobustScaler
+        from model import train_random_forest, train_xgboost
+
+        train_df2, _ = temporal_split_universal(combined_df)
+        scaler2 = RobustScaler()
+        X_train2 = pd.DataFrame(
+            scaler2.fit_transform(train_df2[top_50]),
+            columns=top_50, index=train_df2.index
+        )
+        y_train2 = train_df2['target_direction_1d']
+
+        rf_final  = train_random_forest(X_train2, y_train2)
+        xgb_final = train_xgboost(X_train2, y_train2)
+
+        os.makedirs("models", exist_ok=True)
+        joblib.dump(rf_final,  "models/universal_rf_selected.pkl")
+        joblib.dump(xgb_final, "models/universal_xgb_selected.pkl")
+        joblib.dump(scaler2,   "models/universal_scaler_selected.pkl")
+        joblib.dump(top_50,    "models/universal_features_selected.pkl")
+        importance_df.to_csv("models/feature_importance.csv", index=False)
+
+        logger.info("Models trained and saved. Ready to use.")
+    else:
+        logger.info("Models found. Skipping training.")
+
 def analyze_stock(ticker: str,
                   force_refresh: bool = False,
                   use_universal: bool = True) -> dict:
