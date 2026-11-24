@@ -14,7 +14,9 @@ def run_backtest(df: pd.DataFrame,
                  threshold_short: float = 0.45,
                  transaction_cost: float = 0.001,
                  stop_loss: float = 0.02,
-                 allow_short: bool = True) -> pd.DataFrame:
+                 allow_short: bool = True,
+                 use_risk_scaling: bool = True,
+                 max_position: float = 0.5) -> pd.DataFrame:
     """
     Professional backtest with:
     - Long and short positions
@@ -64,8 +66,27 @@ def run_backtest(df: pd.DataFrame,
             else:
                 return -1.0
             
-    bt['position'] = y_prob.apply(get_position) if hasattr(y_prob, 'apply') \
+    raw_position = y_prob.apply(get_position) if hasattr(y_prob, 'apply') \
                     else np.array([get_position(p) for p in y_prob])
+
+    # --- Hysteresis: only change position if new size differs meaningfully ---
+    # Prevents paying transaction costs on every tiny probability wobble
+    # when the signal hasn't actually changed enough to matter.
+    smoothed = raw_position.copy()
+    for i in range(1, len(smoothed)):
+        if abs(raw_position[i] - smoothed[i-1]) < 0.25:
+            smoothed[i] = smoothed[i-1]
+    bt['position'] = smoothed
+
+    # --- Scale position by composite risk score, then cap max size ---
+    # Uses the risk score you already built in risk.py — high volatility,
+    # choppy trend, or low model confidence all shrink position size.
+    if use_risk_scaling:
+        from risk import composite_risk_score
+        risk_scores = composite_risk_score(df, y_prob).values
+        bt['position'] = bt['position'] * (1 - risk_scores)
+
+    bt['position'] = bt['position'].clip(-max_position, max_position)
 
     # --- Stop loss ---
     # Track running position return, exit if loss exceeds threshold
@@ -73,6 +94,12 @@ def run_backtest(df: pd.DataFrame,
     positions       = bt['position'].values.copy()
 
     for i in range(1, len(positions)):
+        # Reset tracking whenever the position size/direction changed
+        # from the prior day — otherwise P&L from a long trade bleeds
+        # into a short trade's stop-loss tracking (and vice versa).
+        if i > 1 and positions[i-1] != positions[i-2]:
+            position_return = 0.0
+
         if positions[i-1] != 0:
             position_return += positions[i-1] * bt['actual_return'].iloc[i]
             if position_return < -stop_loss:
